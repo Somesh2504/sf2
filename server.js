@@ -153,7 +153,7 @@ app.get('/payment_callback', async (req, res) => {
   // Verify payment internally
   try {
     const verifyResp = await axios.post(
-      'http://localhost:3000/verify_payment',
+      'https://sf2.onrender.com/verify_payment',
       {
         order_id: razorpay_order_id,
         payment_id: razorpay_payment_id,
