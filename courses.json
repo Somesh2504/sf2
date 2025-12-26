@@ -1,0 +1,62 @@
+[
+  {
+    "name": "Full Stack Web Development",
+    "desc": "HTML, CSS, JS, React, Node.js",
+    "price": 10000,
+    "tag": "NEW",
+    "extra": "Internship + Certification<br>Job Assistance",
+    "duration": "12 weeks",
+    "level": "Beginner",
+    "syllabus": "HTML, CSS, JavaScript, React, Node.js"
+  },
+  {
+    "name": "UI/UX with Canva",
+    "desc": "Canva, Figma, UX Process",
+    "price": 1,
+    "tag": "NEW",
+    "extra": "Portfolio Projects<br>+ Job Assistance",
+    "duration": "8 weeks",
+    "level": "Beginner",
+    "syllabus": "Canva, Figma, UX Design Process, Prototyping"
+  },
+  {
+    "name": "Embedded Systems with IoT",
+    "desc": "Arduino, C language, Sensors",
+    "price": 12000,
+    "tag": "NEW",
+    "extra": "Internship + Certification + Job Assistance",
+    "duration": "14 weeks",
+    "level": "Intermediate",
+    "syllabus": "Arduino, C Programming, Sensors, IoT Applications"
+  },
+  {
+    "name": "Medical Coding",
+    "desc": "Anatomy, MS UCT, Reports",
+    "price": 9000,
+    "tag": "⭐",
+    "extra": "Product + Certification<br>+ Job Assistance",
+    "duration": "10 weeks",
+    "level": "Beginner",
+    "syllabus": "Medical Terminology, Coding Standards, Report Analysis"
+  },
+  {
+    "name": "Data Science & Machine Learning",
+    "desc": "Python, Pandas, Scikit-learn, ML Models",
+    "price": 15000,
+    "tag": "TRENDING",
+    "extra": "Hands-on Projects<br>+ Certification + Job Assistance",
+    "duration": "16 weeks",
+    "level": "Intermediate",
+    "syllabus": "Python, Pandas, Numpy, Scikit-learn, Machine Learning Models"
+  },
+  {
+    "name": "Digital Marketing",
+    "desc": "SEO, SEM, Social Media, Analytics",
+    "price": 7000,
+    "tag": "HOT",
+    "extra": "Live Campaigns<br>+ Portfolio + Job Assistance",
+    "duration": "8 weeks",
+    "level": "Beginner",
+    "syllabus": "SEO, SEM, Social Media Marketing, Google Analytics"
+  }
+]
