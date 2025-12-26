@@ -90,22 +90,39 @@ app.post('/create_order', async (req, res) => {
 });
 
 // --------------------
-// VERIFY PAYMENT
+// VERIFY PAYMENT (AUDIT-READY)
 // --------------------
 app.post('/verify_payment', async (req, res) => {
+  const { order_id, payment_id, signature } = req.body;
+
+  // 1️⃣ Signature generation
+  const generated_signature = crypto
+    .createHmac('sha256', RAZORPAY_KEY_SECRET)
+    .update(order_id + "|" + payment_id)
+    .digest('hex');
+
+  const signatureMatched = generated_signature === signature;
+
+  // ✅ LOG VERIFICATION REQUEST + SIGNATURE RESULT
+  saveVerificationLog({
+    step: "SIGNATURE_VERIFICATION",
+    order_id,
+    payment_id,
+    received_signature: signature,
+    generated_signature,
+    signature_matched: signatureMatched,
+    time: new Date().toISOString()
+  });
+
+  if (!signatureMatched) {
+    return res.json({
+      valid: false,
+      reason: "Signature mismatch"
+    });
+  }
+
   try {
-    const { order_id, payment_id, signature } = req.body;
-
-    const generated_signature = crypto
-      .createHmac('sha256', RAZORPAY_KEY_SECRET)
-      .update(order_id + "|" + payment_id)
-      .digest('hex');
-
-    if (generated_signature !== signature) {
-      return res.json({ valid: false, reason: "Signature mismatch" });
-    }
-
-    // 🔁 DUAL INQUIRY (MANDATORY)
+    // 2️⃣ STATUS API (DUAL INQUIRY)
     const paymentResp = await axios.get(
       `https://api.razorpay.com/v1/payments/${payment_id}`,
       {
@@ -116,21 +133,41 @@ app.post('/verify_payment', async (req, res) => {
       }
     );
 
-    if (paymentResp.data.status !== "captured") {
-      return res.json({ valid: false, reason: "Payment not captured" });
-    }
-    saveTransaction({
+    // ✅ LOG STATUS API RESPONSE
+    saveVerificationLog({
+      step: "STATUS_API",
       order_id,
       payment_id,
-      status: "SUCCESS",
-      amount: paymentResp.data.amount,
+      razorpay_status: paymentResp.data.status,
+      full_response: paymentResp.data,
       time: new Date().toISOString()
     });
-    res.json({ valid: true, payment: paymentResp.data });
+
+    if (paymentResp.data.status !== "captured") {
+      return res.json({
+        valid: false,
+        reason: "Payment not captured"
+      });
+    }
+
+    return res.json({
+      valid: true,
+      payment: paymentResp.data
+    });
 
   } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.status(500).json({ error: "Verification failed" });
+    saveVerificationLog({
+      step: "STATUS_API_ERROR",
+      order_id,
+      payment_id,
+      error: err.response?.data || err.message,
+      time: new Date().toISOString()
+    });
+
+    return res.status(500).json({
+      valid: false,
+      reason: "Status API failed"
+    });
   }
 });
 
@@ -337,6 +374,18 @@ function saveTransaction(data) {
   fs.writeFileSync(file, JSON.stringify(existing, null, 2));
 }
 
+
+function saveVerificationLog(log) {
+  const file = path.join(__dirname, 'verification_logs.json');
+  let existing = [];
+
+  if (fs.existsSync(file)) {
+    existing = JSON.parse(fs.readFileSync(file));
+  }
+
+  existing.push(log);
+  fs.writeFileSync(file, JSON.stringify(existing, null, 2));
+}
 // --------------------
 // START SERVER
 // --------------------
