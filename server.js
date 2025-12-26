@@ -1,3 +1,4 @@
+//server.js
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
@@ -134,21 +135,57 @@ app.post('/verify_payment', async (req, res) => {
 });
 
 
+// --------------------
+// RAZORPAY CALLBACK (AUDIT SAFE)
+// --------------------
 app.post('/payment_callback', async (req, res) => {
-  const {
-    razorpay_payment_id,
-    razorpay_order_id,
-    razorpay_signature
-  } = req.body; // ⬅️ NOT req.query
 
+  /**
+   * Razorpay CollectNow Hosted Checkout behavior:
+   * - Sends data as application/x-www-form-urlencoded (FORM POST)
+   * - In some cases, data may appear in query params
+   * 
+   * Audit expects BOTH to be supported
+   */
+
+  // ✅ SAFELY extract from body OR query (fallback)
+  const razorpay_payment_id =
+    req.body.razorpay_payment_id || req.query.razorpay_payment_id;
+
+  const razorpay_order_id =
+    req.body.razorpay_order_id || req.query.razorpay_order_id;
+
+  const razorpay_signature =
+    req.body.razorpay_signature || req.query.razorpay_signature;
+
+  // ✅ Log raw incoming payload (AUDIT EVIDENCE)
+  console.log("🔔 Razorpay Callback Received");
+  console.log("BODY:", req.body);
+  console.log("QUERY:", req.query);
+
+  // ❌ If any value missing → FAIL FAST
   if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
-    return res.send(`
+
+    // Save FAILED attempt for audit trace
+    saveTransaction({
+      order_id: razorpay_order_id || 'NA',
+      payment_id: razorpay_payment_id || 'NA',
+      status: 'FAILED',
+      reason: 'Missing Razorpay callback parameters',
+      raw_body: req.body,
+      raw_query: req.query,
+      time: new Date().toISOString()
+    });
+
+    return res.status(400).send(`
       <h2>Payment Failed</h2>
-      <p>Missing payment details</p>
+      <p>Missing payment details.</p>
+      <p>If amount was debited, it will be auto-refunded.</p>
     `);
   }
 
   try {
+    // ✅ Call internal verification API (Signature + Status API)
     const verifyResp = await axios.post(
       'https://sf2.onrender.com/verify_payment',
       {
@@ -158,40 +195,65 @@ app.post('/payment_callback', async (req, res) => {
       }
     );
 
+    // ❌ Verification failed
     if (!verifyResp.data.valid) {
+
       saveTransaction({
         order_id: razorpay_order_id,
         payment_id: razorpay_payment_id,
-        status: "FAILED",
+        status: 'FAILED',
+        reason: 'Signature mismatch or payment not captured',
+        verification_response: verifyResp.data,
         time: new Date().toISOString()
       });
 
       return res.send(`
         <h2>Payment Failed</h2>
-        <p>Verification failed</p>
+        <p>Verification failed.</p>
       `);
     }
 
+    // ✅ SUCCESS
     const payment = verifyResp.data.payment;
 
+    saveTransaction({
+      order_id: razorpay_order_id,
+      payment_id: razorpay_payment_id,
+      status: 'SUCCESS',
+      amount: payment.amount,
+      method: payment.method,
+      raw_payment_response: payment,
+      time: new Date().toISOString()
+    });
+
+    // ✅ Mandatory audit success response fields
     res.send(`
       <h2>Payment Successful</h2>
+      <p><strong>Status:</strong> SUCCESS</p>
       <p><strong>Order ID:</strong> ${razorpay_order_id}</p>
       <p><strong>Payment ID:</strong> ${razorpay_payment_id}</p>
       <p><strong>Amount:</strong> ₹${payment.amount / 100}</p>
+      <p><strong>Transaction Time:</strong> ${new Date().toLocaleString()}</p>
     `);
 
   } catch (err) {
-    console.error(err);
-    res.send(`<h2>Payment Error</h2>`);
+    console.error("❌ Callback verification error", err.response?.data || err.message);
+
+    saveTransaction({
+      order_id: razorpay_order_id,
+      payment_id: razorpay_payment_id,
+      status: 'FAILED',
+      reason: 'Server error during verification',
+      error: err.message,
+      time: new Date().toISOString()
+    });
+
+    res.status(500).send(`
+      <h2>Payment Error</h2>
+      <p>Something went wrong while verifying payment.</p>
+    `);
   }
 });
-
-// Health check route for Render.com
-app.get('/', (req, res) => {
-  res.send('Server is up and running!');
-});
-
 
 
 app.post('/verify_phone', (req, res) => {
