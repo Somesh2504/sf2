@@ -3,7 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const crypto = require('crypto');
-const bodyParser = require('body-parser');
+
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
@@ -14,7 +14,6 @@ app.use(express.json());
 app.use(cors({
   origin: '*'
 }));
-app.use(bodyParser.json());
 
 // --------------------
 // CONFIG
@@ -188,7 +187,7 @@ app.post('/verify_payment', async (req, res) => {
 // --------------------
 // RAZORPAY PAYMENT FAILED / CANCELLED
 // --------------------
-app.all('/payment_failed', (req, res) => {
+app.all('/payment_failed', async (req, res) => {
 
   /**
    * Razorpay may redirect here when:
