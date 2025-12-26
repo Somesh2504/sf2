@@ -136,6 +136,56 @@ app.post('/verify_payment', async (req, res) => {
 
 
 // --------------------
+// RAZORPAY PAYMENT FAILED / CANCELLED
+// --------------------
+app.all('/payment_failed', (req, res) => {
+
+  /**
+   * Razorpay may redirect here when:
+   * - User cancels payment
+   * - Bank declines
+   * - Timeout occurs
+   *
+   * Data may come in query OR body
+   */
+
+  const razorpay_order_id =
+    req.body.razorpay_order_id || req.query.razorpay_order_id || 'NA';
+
+  const razorpay_payment_id =
+    req.body.razorpay_payment_id || req.query.razorpay_payment_id || 'NA';
+
+  const error_code =
+    req.body.error_code || req.query.error_code || 'PAYMENT_CANCELLED';
+
+  const error_description =
+    req.body.error_description || req.query.error_description || 'User cancelled or payment failed';
+
+  // ✅ SAVE FAILURE FOR AUDIT TRACE
+  saveTransaction({
+    order_id: razorpay_order_id,
+    payment_id: razorpay_payment_id,
+    status: 'FAILED',
+    error_code,
+    error_description,
+    raw_body: req.body,
+    raw_query: req.query,
+    time: new Date().toISOString()
+  });
+
+  // ✅ AUDIT-FRIENDLY FAILURE PAGE
+  res.send(`
+    <h2>Payment Failed</h2>
+    <p><strong>Status:</strong> FAILED</p>
+    <p><strong>Order ID:</strong> ${razorpay_order_id}</p>
+    <p><strong>Payment ID:</strong> ${razorpay_payment_id}</p>
+    <p><strong>Reason:</strong> ${error_description}</p>
+    <p>If amount was debited, it will be auto-refunded by Razorpay.</p>
+  `);
+});
+
+
+// --------------------
 // RAZORPAY CALLBACK (AUDIT SAFE)
 // --------------------
 app.post('/payment_callback', async (req, res) => {
