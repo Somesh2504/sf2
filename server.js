@@ -8,6 +8,8 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 app.use(cors({
   origin: '*'
 }));
@@ -131,17 +133,13 @@ app.post('/verify_payment', async (req, res) => {
   }
 });
 
-// Health check route for Render.com
-app.get('/', (req, res) => {
-  res.send('Server is up and running!');
-});
 
-app.get('/payment_callback', async (req, res) => {
+app.post('/payment_callback', async (req, res) => {
   const {
     razorpay_payment_id,
     razorpay_order_id,
     razorpay_signature
-  } = req.query;
+  } = req.body; // ⬅️ NOT req.query
 
   if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
     return res.send(`
@@ -150,7 +148,6 @@ app.get('/payment_callback', async (req, res) => {
     `);
   }
 
-  // Verify payment internally
   try {
     const verifyResp = await axios.post(
       'https://sf2.onrender.com/verify_payment',
@@ -162,6 +159,13 @@ app.get('/payment_callback', async (req, res) => {
     );
 
     if (!verifyResp.data.valid) {
+      saveTransaction({
+        order_id: razorpay_order_id,
+        payment_id: razorpay_payment_id,
+        status: "FAILED",
+        time: new Date().toISOString()
+      });
+
       return res.send(`
         <h2>Payment Failed</h2>
         <p>Verification failed</p>
@@ -178,9 +182,17 @@ app.get('/payment_callback', async (req, res) => {
     `);
 
   } catch (err) {
+    console.error(err);
     res.send(`<h2>Payment Error</h2>`);
   }
 });
+
+// Health check route for Render.com
+app.get('/', (req, res) => {
+  res.send('Server is up and running!');
+});
+
+
 
 app.post('/verify_phone', (req, res) => {
   const { phone, idToken } = req.body;
