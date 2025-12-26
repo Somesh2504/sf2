@@ -39,6 +39,19 @@ try {
   process.exit(1);
 }
 
+
+async function logToGoogleSheet(sheet, data) {
+  try {
+    await axios.post(process.env.GSHEET_LOG_URL, {
+      sheet,
+      ...data
+    }, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (err) {
+    console.error('❌ Google Sheet log failed:', err.response?.data || err.message);
+  }
+}
 // --------------------
 // CREATE ORDER
 // --------------------
@@ -104,7 +117,7 @@ app.post('/verify_payment', async (req, res) => {
   const signatureMatched = generated_signature === signature;
 
   // ✅ LOG VERIFICATION REQUEST + SIGNATURE RESULT
-  saveVerificationLog({
+ await saveVerificationLog({
     step: "SIGNATURE_VERIFICATION",
     order_id,
     payment_id,
@@ -134,7 +147,7 @@ app.post('/verify_payment', async (req, res) => {
     );
 
     // ✅ LOG STATUS API RESPONSE
-    saveVerificationLog({
+    await saveVerificationLog({
       step: "STATUS_API",
       order_id,
       payment_id,
@@ -156,7 +169,7 @@ app.post('/verify_payment', async (req, res) => {
     });
 
   } catch (err) {
-    saveVerificationLog({
+   await saveVerificationLog({
       step: "STATUS_API_ERROR",
       order_id,
       payment_id,
@@ -199,7 +212,7 @@ app.all('/payment_failed', (req, res) => {
     req.body.error_description || req.query.error_description || 'User cancelled or payment failed';
 
   // ✅ SAVE FAILURE FOR AUDIT TRACE
-  saveTransaction({
+  await saveTransaction({
     order_id: razorpay_order_id,
     payment_id: razorpay_payment_id,
     status: 'FAILED',
@@ -254,7 +267,7 @@ app.post('/payment_callback', async (req, res) => {
   if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
 
     // Save FAILED attempt for audit trace
-    saveTransaction({
+  await  saveTransaction({
       order_id: razorpay_order_id || 'NA',
       payment_id: razorpay_payment_id || 'NA',
       status: 'FAILED',
@@ -285,7 +298,7 @@ app.post('/payment_callback', async (req, res) => {
     // ❌ Verification failed
     if (!verifyResp.data.valid) {
 
-      saveTransaction({
+    await  saveTransaction({
         order_id: razorpay_order_id,
         payment_id: razorpay_payment_id,
         status: 'FAILED',
@@ -303,7 +316,7 @@ app.post('/payment_callback', async (req, res) => {
     // ✅ SUCCESS
     const payment = verifyResp.data.payment;
 
-    saveTransaction({
+   await saveTransaction({
       order_id: razorpay_order_id,
       payment_id: razorpay_payment_id,
       status: 'SUCCESS',
@@ -326,7 +339,7 @@ app.post('/payment_callback', async (req, res) => {
   } catch (err) {
     console.error("❌ Callback verification error", err.response?.data || err.message);
 
-    saveTransaction({
+    await saveTransaction({
       order_id: razorpay_order_id,
       payment_id: razorpay_payment_id,
       status: 'FAILED',
@@ -364,28 +377,42 @@ app.post('/verify_phone', (req, res) => {
 });
 
 
-function saveTransaction(data) {
-  const file = path.join(__dirname, 'transactions.json');
-  let existing = [];
-  if (fs.existsSync(file)) {
-    existing = JSON.parse(fs.readFileSync(file));
-  }
-  existing.push(data);
-  fs.writeFileSync(file, JSON.stringify(existing, null, 2));
+async function saveTransaction(data) {
+  await logToGoogleSheet('transactions', {
+    timestamp: new Date().toISOString(),
+    order_id: data.order_id || '',
+    payment_id: data.payment_id || '',
+    status: data.status || '',
+    amount: data.amount || '',
+    method: data.method || '',
+    error_code: data.error_code || '',
+    error_description: data.error_description || '',
+    raw_response: JSON.stringify(
+      data.raw_payment_response ||
+      data.verification_response ||
+      data.raw_body ||
+      {}
+    )
+  });
+}
+
+async function saveVerificationLog(log) {
+  await logToGoogleSheet('verification_logs', {
+    timestamp: new Date().toISOString(),
+    step: log.step || '',
+    order_id: log.order_id || '',
+    payment_id: log.payment_id || '',
+    signature_matched: log.signature_matched ?? '',
+    razorpay_status: log.razorpay_status || '',
+    raw_data: JSON.stringify(
+      log.full_response ||
+      log.error ||
+      {}
+    )
+  });
 }
 
 
-function saveVerificationLog(log) {
-  const file = path.join(__dirname, 'verification_logs.json');
-  let existing = [];
-
-  if (fs.existsSync(file)) {
-    existing = JSON.parse(fs.readFileSync(file));
-  }
-
-  existing.push(log);
-  fs.writeFileSync(file, JSON.stringify(existing, null, 2));
-}
 // --------------------
 // START SERVER
 // --------------------
