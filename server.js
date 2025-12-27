@@ -18,7 +18,7 @@ app.use(cors({ origin: '*' }));
 // --------------------
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
-const FRONTEND_BASE_URL = 'http://127.0.0.1:5501';
+const FRONTEND_BASE_URL = 'https://silly-sfogliatella-a33d4a.netlify.app/';
 
 
 // Load courses from JSON
