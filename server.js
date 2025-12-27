@@ -248,9 +248,7 @@ app.all('/payment_failed', async (req, res) => {
 
   return res.redirect(302,
     `${FRONTEND_BASE_URL}payment_failed.html` +
-    `?order_id=${encodeURIComponent(orderId)}` +
-    `&payment_id=${encodeURIComponent(paymentId)}` +
-    `&reason=${encodeURIComponent(reason)}`
+    `?reason=${encodeURIComponent(reason)}`
   );
 });
 
@@ -299,9 +297,7 @@ app.post('/payment_callback', async (req, res) => {
 
     return res.redirect(302,
       `${FRONTEND_BASE_URL}payment_failed.html` +
-      `?order_id=${encodeURIComponent(razorpay_order_id)}` +
-      `&payment_id=${encodeURIComponent(razorpay_payment_id)}` +
-      `&reason=verification_failed`
+      `?reason=${encodeURIComponent(reason)}`
     );
 
   }
