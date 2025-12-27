@@ -18,7 +18,7 @@ app.use(cors({ origin: '*' }));
 // --------------------
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
-const FRONTEND_BASE_URL = 'https://studentforgesf.netlify.app/';
+const FRONTEND_BASE_URL = 'http://studentforge.in/';
 
 
 // Load courses from JSON
