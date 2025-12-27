@@ -1,9 +1,8 @@
-//server.js
+// server.js
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const crypto = require('crypto');
-
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
@@ -11,15 +10,15 @@ const path = require('path');
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-app.use(cors({
-  origin: '*'
-}));
+app.use(cors({ origin: '*' }));
+
 
 // --------------------
 // CONFIG
 // --------------------
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+const FRONTEND_BASE_URL = 'https://studentforge.in';
 
 
 // Load courses from JSON
@@ -50,6 +49,41 @@ async function logToGoogleSheet(sheet, data) {
   } catch (err) {
     console.error('❌ Google Sheet log failed:', err.response?.data || err.message);
   }
+}
+
+async function saveTransaction(data) {
+  await logToGoogleSheet('transactions', {
+    timestamp: new Date().toISOString(),
+    order_id: data.order_id || '',
+    payment_id: data.payment_id || '',
+    status: data.status || '',
+    amount: data.amount || '',
+    method: data.method || '',
+    error_code: data.error_code || '',
+    error_description: data.error_description || '',
+    raw_response: JSON.stringify(
+      data.raw_payment_response ||
+      data.verification_response ||
+      data.raw_body ||
+      {}
+    )
+  });
+}
+
+async function saveVerificationLog(log) {
+  await logToGoogleSheet('verification_logs', {
+    timestamp: new Date().toISOString(),
+    step: log.step || '',
+    order_id: log.order_id || '',
+    payment_id: log.payment_id || '',
+    signature_matched: log.signature_matched ?? '',
+    razorpay_status: log.razorpay_status || '',
+    raw_data: JSON.stringify(
+      log.full_response ||
+      log.error ||
+      {}
+    )
+  });
 }
 // --------------------
 // CREATE ORDER
@@ -188,49 +222,25 @@ app.post('/verify_payment', async (req, res) => {
 // RAZORPAY PAYMENT FAILED / CANCELLED
 // --------------------
 app.all('/payment_failed', async (req, res) => {
+  const orderId = req.body.razorpay_order_id || req.query.razorpay_order_id || '';
+  const paymentId = req.body.razorpay_payment_id || req.query.razorpay_payment_id || '';
+  const reason = req.body.error_description || req.query.error_description || 'payment_failed';
 
-  /**
-   * Razorpay may redirect here when:
-   * - User cancels payment
-   * - Bank declines
-   * - Timeout occurs
-   *
-   * Data may come in query OR body
-   */
-
-  const razorpay_order_id =
-    req.body.razorpay_order_id || req.query.razorpay_order_id || 'NA';
-
-  const razorpay_payment_id =
-    req.body.razorpay_payment_id || req.query.razorpay_payment_id || 'NA';
-
-  const error_code =
-    req.body.error_code || req.query.error_code || 'PAYMENT_CANCELLED';
-
-  const error_description =
-    req.body.error_description || req.query.error_description || 'User cancelled or payment failed';
-
-  // ✅ SAVE FAILURE FOR AUDIT TRACE
   await saveTransaction({
-    order_id: razorpay_order_id,
-    payment_id: razorpay_payment_id,
+    order_id: orderId,
+    payment_id: paymentId,
     status: 'FAILED',
-    error_code,
-    error_description,
+    error_description: reason,
     raw_body: req.body,
-    raw_query: req.query,
-    time: new Date().toISOString()
+    raw_query: req.query
   });
 
-  // ✅ AUDIT-FRIENDLY FAILURE PAGE
-  res.send(`
-    <h2>Payment Failed</h2>
-    <p><strong>Status:</strong> FAILED</p>
-    <p><strong>Order ID:</strong> ${razorpay_order_id}</p>
-    <p><strong>Payment ID:</strong> ${razorpay_payment_id}</p>
-    <p><strong>Reason:</strong> ${error_description}</p>
-    <p>If amount was debited, it will be auto-refunded by Razorpay.</p>
-  `);
+  return res.redirect(302,
+    `${FRONTEND_BASE_URL}/payment_failed` +
+    `?order_id=${encodeURIComponent(orderId)}` +
+    `&payment_id=${encodeURIComponent(paymentId)}` +
+    `&reason=${encodeURIComponent(reason)}`
+  );
 });
 
 
@@ -276,11 +286,8 @@ app.post('/payment_callback', async (req, res) => {
       time: new Date().toISOString()
     });
 
-    return res.status(400).send(`
-      <h2>Payment Failed</h2>
-      <p>Missing payment details.</p>
-      <p>If amount was debited, it will be auto-refunded.</p>
-    `);
+    return res.redirect(302, `${FRONTEND_BASE_URL}/payment_failed`);
+
   }
 
   try {
@@ -306,10 +313,10 @@ app.post('/payment_callback', async (req, res) => {
         time: new Date().toISOString()
       });
 
-      return res.send(`
-        <h2>Payment Failed</h2>
-        <p>Verification failed.</p>
-      `);
+      return res.redirect(302,
+        `${FRONTEND_BASE_URL}/payment_failed` +
+        `?order_id=${orderId}&payment_id=${paymentId}&reason=verification_failed`
+      );
     }
 
     // ✅ SUCCESS
@@ -326,14 +333,12 @@ app.post('/payment_callback', async (req, res) => {
     });
 
     // ✅ Mandatory audit success response fields
-    res.send(`
-      <h2>Payment Successful</h2>
-      <p><strong>Status:</strong> SUCCESS</p>
-      <p><strong>Order ID:</strong> ${razorpay_order_id}</p>
-      <p><strong>Payment ID:</strong> ${razorpay_payment_id}</p>
-      <p><strong>Amount:</strong> ₹${payment.amount / 100}</p>
-      <p><strong>Transaction Time:</strong> ${new Date().toLocaleString()}</p>
-    `);
+    return res.redirect(302,
+      `${FRONTEND_BASE_URL}/payment_success` +
+      `?order_id=${orderId}` +
+      `&payment_id=${paymentId}` +
+      `&amount=${payment.amount / 100}`
+    );
 
   } catch (err) {
     console.error("❌ Callback verification error", err.response?.data || err.message);
@@ -375,41 +380,6 @@ app.post('/verify_phone', (req, res) => {
   res.json({ success: true, phone });
 });
 
-
-async function saveTransaction(data) {
-  await logToGoogleSheet('transactions', {
-    timestamp: new Date().toISOString(),
-    order_id: data.order_id || '',
-    payment_id: data.payment_id || '',
-    status: data.status || '',
-    amount: data.amount || '',
-    method: data.method || '',
-    error_code: data.error_code || '',
-    error_description: data.error_description || '',
-    raw_response: JSON.stringify(
-      data.raw_payment_response ||
-      data.verification_response ||
-      data.raw_body ||
-      {}
-    )
-  });
-}
-
-async function saveVerificationLog(log) {
-  await logToGoogleSheet('verification_logs', {
-    timestamp: new Date().toISOString(),
-    step: log.step || '',
-    order_id: log.order_id || '',
-    payment_id: log.payment_id || '',
-    signature_matched: log.signature_matched ?? '',
-    razorpay_status: log.razorpay_status || '',
-    raw_data: JSON.stringify(
-      log.full_response ||
-      log.error ||
-      {}
-    )
-  });
-}
 
 
 // --------------------
