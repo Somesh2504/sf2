@@ -222,9 +222,20 @@ app.post('/verify_payment', async (req, res) => {
 // RAZORPAY PAYMENT FAILED / CANCELLED
 // --------------------
 app.all('/payment_failed', async (req, res) => {
-  const orderId = req.body.razorpay_order_id || req.query.razorpay_order_id || '';
-  const paymentId = req.body.razorpay_payment_id || req.query.razorpay_payment_id || '';
-  const reason = req.body.error_description || req.query.error_description || 'payment_failed';
+  const orderId =
+    req.body.razorpay_order_id ||
+    req.query.razorpay_order_id ||
+    '';
+
+  const paymentId =
+    req.body.razorpay_payment_id ||
+    req.query.razorpay_payment_id ||
+    '';
+
+  const reason =
+    req.body.error_description ||
+    req.query.error_description ||
+    'payment_failed';
 
   await saveTransaction({
     order_id: orderId,
@@ -236,10 +247,10 @@ app.all('/payment_failed', async (req, res) => {
   });
 
   return res.redirect(302,
-    `${FRONTEND_BASE_URL}payment_success.html` +
-    `?order_id=${encodeURIComponent(razorpay_order_id)}` +
-    `&payment_id=${encodeURIComponent(razorpay_payment_id)}` +
-    `&amount=${payment.amount / 100}`
+    `${FRONTEND_BASE_URL}payment_failed.html` +
+    `?order_id=${encodeURIComponent(orderId)}` +
+    `&payment_id=${encodeURIComponent(paymentId)}` +
+    `&reason=${encodeURIComponent(reason)}`
   );
 });
 
