@@ -18,7 +18,7 @@ app.use(cors({ origin: '*' }));
 // --------------------
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
-const FRONTEND_BASE_URL = 'http://studentforge.in/';
+const FRONTEND_BASE_URL = 'https://studentforgesf.netlify.app/';
 
 
 // Load courses from JSON
@@ -140,7 +140,10 @@ app.post('/create_order', async (req, res) => {
 // --------------------
 app.post('/verify_payment', async (req, res) => {
   const { order_id, payment_id, signature } = req.body;
-
+  console.log("order_id===",order_id);
+  console.log("payment_id===",payment_id);
+  console.log("signature===",signature)
+   
   // 1️⃣ Signature generation
   const generated_signature = crypto
     .createHmac('sha256', RAZORPAY_KEY_SECRET)
@@ -148,6 +151,8 @@ app.post('/verify_payment', async (req, res) => {
     .digest('hex');
 
   const signatureMatched = generated_signature === signature;
+  console.log("generate signature===",generated_signature);
+  console.log("received signature===",signature)
 
   // ✅ LOG VERIFICATION REQUEST + SIGNATURE RESULT
  await saveVerificationLog({
