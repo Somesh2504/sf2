@@ -343,7 +343,7 @@ app.post('/payment_callback', async (req, res) => {
       order_id: razorpay_order_id,
       payment_id: razorpay_payment_id,
       status: 'SUCCESS',
-      amount: payment.amount,
+      amount: payment.amount/100,
       method: payment.method,
       raw_payment_response: payment,
       time: new Date().toISOString()
