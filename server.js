@@ -59,8 +59,6 @@ async function saveTransaction(data) {
     status: data.status || '',
     amount: data.amount || '',
     method: data.method || '',
-    error_code: data.error_code || '',
-    error_description: data.error_description || '',
     raw_response: JSON.stringify(
       data.raw_payment_response ||
       data.verification_response ||
@@ -143,7 +141,10 @@ app.post('/verify_payment', async (req, res) => {
   console.log("order_id===",order_id);
   console.log("payment_id===",payment_id);
   console.log("signature===",signature)
-   
+     const alreadyVerified = await isPaymentAlreadyProcessed(order_id, payment_id);
+if (alreadyVerified) {
+  return res.json({ valid: false, reason: 'Payment already processed' });
+}
   // 1️⃣ Signature generation
   const generated_signature = crypto
     .createHmac('sha256', RAZORPAY_KEY_SECRET)
@@ -257,6 +258,20 @@ app.all('/payment_failed', async (req, res) => {
   );
 });
 
+async function isPaymentAlreadyProcessed(order_id, payment_id) {
+  try {
+    const resp = await axios.post(process.env.GSHEET_LOG_URL, {
+      sheet: 'transactions',
+      check_only: true,
+      order_id,
+      payment_id
+    });
+    return resp.data?.exists === true;
+  } catch (err) {
+    console.error('❌ Duplicate check failed', err.message);
+    return false; // fail-safe: allow once
+  }
+}
 
 // --------------------
 // RAZORPAY CALLBACK (AUDIT SAFE)
@@ -270,7 +285,6 @@ app.post('/payment_callback', async (req, res) => {
    * 
    * Audit expects BOTH to be supported
    */
-
   // ✅ SAFELY extract from body OR query (fallback)
   const razorpay_payment_id =
     req.body.razorpay_payment_id || req.query.razorpay_payment_id;
@@ -285,7 +299,15 @@ app.post('/payment_callback', async (req, res) => {
   console.log("🔔 Razorpay Callback Received");
   console.log("BODY:", req.body);
   console.log("QUERY:", req.query);
+      const alreadyProcessed = await isPaymentAlreadyProcessed(
+  razorpay_order_id,
+  razorpay_payment_id
+);
 
+if (alreadyProcessed) {
+  console.warn('⚠️ Duplicate callback blocked:', razorpay_order_id);
+  return res.status(409).send('Duplicate payment callback ignored');
+}
   // ❌ If any value missing → FAIL FAST
   if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
 
