@@ -12,6 +12,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(cors({ origin: '*' }));
 
+// --------------------
+// In-memory atomic lock for payment processing
+// --------------------
+const processingPayments = new Set();
 
 // --------------------
 // CONFIG
@@ -52,6 +56,13 @@ async function logToGoogleSheet(sheet, data) {
 }
 
 async function saveTransaction(data) {
+  if (data.status === 'SUCCESS') {
+  const already = await isPaymentAlreadyProcessed(data.order_id, data.payment_id);
+  if (already) {
+    console.warn("⚠️ Duplicate SUCCESS insert prevented");
+    return;
+  }
+}
   await logToGoogleSheet('transactions', {
     timestamp: new Date().toISOString(),
     order_id: data.order_id || '',
@@ -224,68 +235,193 @@ if (alreadyVerified) {
 });
 
 
-// --------------------
-// RAZORPAY PAYMENT FAILED / CANCELLED
-// --------------------
-app.all('/payment_failed', async (req, res) => {
-  const orderId =
-    req.body.razorpay_order_id ||
-    req.query.razorpay_order_id ||
-    '';
+// // --------------------
+// // RAZORPAY PAYMENT FAILED / CANCELLED
+// // --------------------
+// app.all('/payment_failed', async (req, res) => {
+//   const orderId =
+//     req.body.razorpay_order_id ||
+//     req.query.razorpay_order_id ||
+//     '';
 
-  const paymentId =
-    req.body.razorpay_payment_id ||
-    req.query.razorpay_payment_id ||
-    '';
+//   const paymentId =
+//     req.body.razorpay_payment_id ||
+//     req.query.razorpay_payment_id ||
+//     '';
 
-  const reason =
-    req.body.error_description ||
-    req.query.error_description ||
-    'payment_failed';
+//   const reason =
+//     req.body.error_description ||
+//     req.query.error_description ||
+//     'payment_failed';
 
-  await saveTransaction({
-    order_id: orderId,
-    payment_id: paymentId,
-    status: 'FAILED',
-    error_description: reason,
-    raw_body: req.body,
-    raw_query: req.query
-  });
+//   await saveTransaction({
+//     order_id: orderId,
+//     payment_id: paymentId,
+//     status: 'FAILED',
+//     error_description: reason,
+//     raw_body: req.body,
+//     raw_query: req.query
+//   });
 
-  return res.redirect(302,
-    `${FRONTEND_BASE_URL}payment_failed.html` +
-    `?reason=missing_callback_params`
-  );
-});
+//   return res.redirect(302,
+//     `${FRONTEND_BASE_URL}payment_failed.html` +
+//     `?reason=missing_callback_params`
+//   );
+// });
 
-async function isPaymentAlreadyProcessed(order_id, payment_id) {
-  try {
-    const resp = await axios.post(process.env.GSHEET_LOG_URL, {
-      sheet: 'transactions',
-      check_only: true,
-      order_id,
-      payment_id
-    });
-    return resp.data?.exists === true;
-  } catch (err) {
-    console.error('❌ Duplicate check failed', err.message);
-    return false; // fail-safe: allow once
-  }
-}
+// async function isPaymentAlreadyProcessed(order_id, payment_id) {
+//   try {
+//     const resp = await axios.post(process.env.GSHEET_LOG_URL, {
+//       sheet: 'transactions',
+//       check_only: true,
+//       order_id,
+//       payment_id
+//     });
+//     return resp.data?.exists === true;
+//   } catch (err) {
+//     console.error('❌ Duplicate check failed', err.message);
+//     return false; // fail-safe: allow once
+//   }
+// }
 
-// --------------------
-// RAZORPAY CALLBACK (AUDIT SAFE)
-// --------------------
+// // --------------------
+// // RAZORPAY CALLBACK (AUDIT SAFE)
+// // --------------------
+// app.post('/payment_callback', async (req, res) => {
+//   const razorpay_payment_id =
+//     req.body.razorpay_payment_id || req.query.razorpay_payment_id;
+
+//   const razorpay_order_id =
+//     req.body.razorpay_order_id || req.query.razorpay_order_id;
+
+//   const razorpay_signature =
+//     req.body.razorpay_signature || req.query.razorpay_signature;
+
+//     if (processingPayments.has(razorpay_payment_id)) {
+//   console.warn("⚠️ Parallel duplicate blocked:", razorpay_payment_id);
+//   return res.status(409).send("Duplicate request blocked");
+// }
+
+// // Lock it immediately
+// processingPayments.add(razorpay_payment_id);
+
+//   // ✅ Log raw incoming payload (AUDIT EVIDENCE)
+//   console.log("🔔 Razorpay Callback Received");
+//   console.log("BODY:", req.body);
+//   console.log("QUERY:", req.query);
+//       const alreadyProcessed = await isPaymentAlreadyProcessed(
+//   razorpay_order_id,
+//   razorpay_payment_id
+// );
+
+// if (alreadyProcessed) {
+//   console.warn('⚠️ Duplicate callback blocked:', razorpay_order_id);
+//   return res.status(409).send('Duplicate payment callback ignored');
+// }
+//   // ❌ If any value missing → FAIL FAST
+//   if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+
+//     // Save FAILED attempt for audit trace
+//   await  saveTransaction({
+//       order_id: razorpay_order_id || 'NA',
+//       payment_id: razorpay_payment_id || 'NA',
+//       status: 'FAILED',
+//       reason: 'Missing Razorpay callback parameters',
+//       raw_body: req.body,
+//       raw_query: req.query,
+//       time: new Date().toISOString()
+//     });
+
+//     return res.redirect(302,
+//       `${FRONTEND_BASE_URL}payment_failed.html` +
+//       `?reason=missing_callback_params`
+//     );
+
+//   }
+
+//   try {
+//     // ✅ Call internal verification API (Signature + Status API)
+//     const verifyResp = await axios.post(
+//       'https://sf2.onrender.com/verify_payment',
+//       {
+//         order_id: razorpay_order_id,
+//         payment_id: razorpay_payment_id,
+//         signature: razorpay_signature
+//       }
+//     );
+
+//     // ❌ Verification failed
+//     if (!verifyResp.data.valid) {
+
+//     await  saveTransaction({
+//         order_id: razorpay_order_id,
+//         payment_id: razorpay_payment_id,
+//         status: 'FAILED',
+//         reason: 'Signature mismatch or payment not captured',
+//         verification_response: verifyResp.data,
+//         time: new Date().toISOString()
+//       });
+
+//       return res.redirect(302,
+//         `${FRONTEND_BASE_URL}payment_failed.html` +
+//         `&reason=verification_failed`
+//       );
+//     }
+
+//     // ✅ SUCCESS
+//     const payment = verifyResp.data.payment;
+
+//    await saveTransaction({
+//       order_id: razorpay_order_id,
+//       payment_id: razorpay_payment_id,
+//       status: 'SUCCESS',
+//       amount: payment.amount/100,
+//       method: payment.method,
+//       raw_payment_response: payment,
+//       time: new Date().toISOString()
+//     });
+
+//     // ✅ Mandatory audit success response fields
+//     processingPayments.delete(razorpay_payment_id);
+//     const successToken = crypto.randomBytes(16).toString('hex');
+
+// // Store token in memory (temporary secure storage)
+// if (!global.successTokens) global.successTokens = {};
+// global.successTokens[successToken] = {
+//   order_id: razorpay_order_id,
+//   payment_id: razorpay_payment_id,
+//   amount: payment.amount / 100,
+//   expires: Date.now() + 5 * 60 * 1000 // 5 min expiry
+// };
+
+// processingPayments.delete(razorpay_payment_id);
+
+// return res.redirect(302,
+//   `${FRONTEND_BASE_URL}payment_success.html?ref=${successToken}`
+// );
+
+//   } catch (err) {
+//     console.error("❌ Callback verification error", err.response?.data || err.message);
+
+//     await saveTransaction({
+//       order_id: razorpay_order_id,
+//       payment_id: razorpay_payment_id,
+//       status: 'FAILED',
+//       reason: 'Server error during verification',
+//       error: err.message,
+//       time: new Date().toISOString()
+//     });
+
+//     res.status(500).send(`
+//       <h2>Payment Error</h2>
+//       <p>Something went wrong while verifying payment.</p>
+//     `);
+//   }
+//   processingPayments.delete(razorpay_payment_id);
+// });
+
 app.post('/payment_callback', async (req, res) => {
 
-  /**
-   * Razorpay CollectNow Hosted Checkout behavior:
-   * - Sends data as application/x-www-form-urlencoded (FORM POST)
-   * - In some cases, data may appear in query params
-   * 
-   * Audit expects BOTH to be supported
-   */
-  // ✅ SAFELY extract from body OR query (fallback)
   const razorpay_payment_id =
     req.body.razorpay_payment_id || req.query.razorpay_payment_id;
 
@@ -295,42 +431,30 @@ app.post('/payment_callback', async (req, res) => {
   const razorpay_signature =
     req.body.razorpay_signature || req.query.razorpay_signature;
 
-  // ✅ Log raw incoming payload (AUDIT EVIDENCE)
-  console.log("🔔 Razorpay Callback Received");
-  console.log("BODY:", req.body);
-  console.log("QUERY:", req.query);
-      const alreadyProcessed = await isPaymentAlreadyProcessed(
-  razorpay_order_id,
-  razorpay_payment_id
-);
-
-if (alreadyProcessed) {
-  console.warn('⚠️ Duplicate callback blocked:', razorpay_order_id);
-  return res.status(409).send('Duplicate payment callback ignored');
-}
-  // ❌ If any value missing → FAIL FAST
+  // 1️⃣ Validate required params first
   if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
-
-    // Save FAILED attempt for audit trace
-  await  saveTransaction({
-      order_id: razorpay_order_id || 'NA',
-      payment_id: razorpay_payment_id || 'NA',
-      status: 'FAILED',
-      reason: 'Missing Razorpay callback parameters',
-      raw_body: req.body,
-      raw_query: req.query,
-      time: new Date().toISOString()
-    });
-
-    return res.redirect(302,
-      `${FRONTEND_BASE_URL}payment_failed.html` +
-      `?reason=missing_callback_params`
-    );
-
+    return res.status(400).send("Missing parameters");
   }
 
+  // 2️⃣ Race Condition Lock
+  if (processingPayments.has(razorpay_payment_id)) {
+    console.warn("⚠️ Parallel duplicate blocked:", razorpay_payment_id);
+    return res.status(409).send("Duplicate request blocked");
+  }
+
+  processingPayments.add(razorpay_payment_id);
+
   try {
-    // ✅ Call internal verification API (Signature + Status API)
+
+    const alreadyProcessed = await isPaymentAlreadyProcessed(
+      razorpay_order_id,
+      razorpay_payment_id
+    );
+
+    if (alreadyProcessed) {
+      return res.status(409).send("Duplicate payment ignored");
+    }
+
     const verifyResp = await axios.post(
       'https://sf2.onrender.com/verify_payment',
       {
@@ -340,62 +464,45 @@ if (alreadyProcessed) {
       }
     );
 
-    // ❌ Verification failed
     if (!verifyResp.data.valid) {
-
-    await  saveTransaction({
-        order_id: razorpay_order_id,
-        payment_id: razorpay_payment_id,
-        status: 'FAILED',
-        reason: 'Signature mismatch or payment not captured',
-        verification_response: verifyResp.data,
-        time: new Date().toISOString()
-      });
-
-      return res.redirect(302,
-        `${FRONTEND_BASE_URL}payment_failed.html` +
-        `&reason=verification_failed`
-      );
+      return res.status(400).send("Verification failed");
     }
 
-    // ✅ SUCCESS
     const payment = verifyResp.data.payment;
-
-   await saveTransaction({
-      order_id: razorpay_order_id,
-      payment_id: razorpay_payment_id,
-      status: 'SUCCESS',
-      amount: payment.amount/100,
-      method: payment.method,
-      raw_payment_response: payment,
-      time: new Date().toISOString()
-    });
-
-    // ✅ Mandatory audit success response fields
-    return res.redirect(302,
-      `${FRONTEND_BASE_URL}payment_success.html` +
-      `?order_id=${encodeURIComponent(razorpay_order_id)}` +
-      `&payment_id=${encodeURIComponent(razorpay_payment_id)}` +
-      `&amount=${payment.amount / 100}`
-    );
-
-  } catch (err) {
-    console.error("❌ Callback verification error", err.response?.data || err.message);
 
     await saveTransaction({
       order_id: razorpay_order_id,
       payment_id: razorpay_payment_id,
-      status: 'FAILED',
-      reason: 'Server error during verification',
-      error: err.message,
-      time: new Date().toISOString()
+      status: 'SUCCESS',
+      amount: payment.amount / 100,
+      method: payment.method,
+      raw_payment_response: payment
     });
 
-    res.status(500).send(`
-      <h2>Payment Error</h2>
-      <p>Something went wrong while verifying payment.</p>
-    `);
+    // Generate secure token
+    const successToken = crypto.randomBytes(16).toString('hex');
+
+    if (!global.successTokens) global.successTokens = {};
+
+    global.successTokens[successToken] = {
+      order_id: razorpay_order_id,
+      payment_id: razorpay_payment_id,
+      amount: payment.amount / 100,
+      expires: Date.now() + 5 * 60 * 1000
+    };
+
+    return res.redirect(302,
+      `${FRONTEND_BASE_URL}payment_success.html?ref=${successToken}`
+    );
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).send("Server error");
+
+  } finally {
+    processingPayments.delete(razorpay_payment_id);
   }
+
 });
 
 
@@ -419,7 +526,29 @@ app.post('/verify_phone', (req, res) => {
   res.json({ success: true, phone });
 });
 
+app.get('/validate_success', (req, res) => {
+  const ref = req.query.ref;
 
+  if (!ref || !global.successTokens || !global.successTokens[ref]) {
+    return res.status(403).json({ valid: false });
+  }
+
+  const data = global.successTokens[ref];
+
+  if (Date.now() > data.expires) {
+    delete global.successTokens[ref];
+    return res.status(403).json({ valid: false });
+  }
+
+  delete global.successTokens[ref];
+
+  return res.json({
+    valid: true,
+    order_id: data.order_id,
+    payment_id: data.payment_id,
+    amount: data.amount
+  });
+});
 
 // --------------------
 // START SERVER
